@@ -1,0 +1,8 @@
+# ©2026 VIDO Mahin Ltd develop by (Tanvir)
+
+venv/
+__pycache__/
+*.pyc
+.env
+.vscode/
+.idea/

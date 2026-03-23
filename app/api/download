@@ -1,0 +1,62 @@
+# ©2026 VIDO Mahin Ltd develop by (Tanvir)
+
+from fastapi import APIRouter, HTTPException, Depends, Query, status
+from fastapi.responses import StreamingResponse
+import httpx
+from typing import Dict, Any
+
+from app.api.auth import get_current_user
+from app.services.extractor import extract_media_info
+from app.services.cache import media_cache
+from app.db.mongodb import get_database
+
+router = APIRouter()
+
+@router.get("/extract")
+async def extract_media(
+    url: str = Query(..., description="The media URL"),
+    format_type: str = Query("video"),
+    current_user: dict = Depends(get_current_user)
+) -> Dict[str, Any]:
+    # ... (আগের কোডটুকু ঠিক থাকবে, শুধু রিটার্ন পার্টটা একটু আপডেট হবে)
+    
+    extraction_result = await extract_media_info(url=url, format_type=format_type)
+    if not extraction_result.get("success"):
+        raise HTTPException(status_code=400, detail="Extraction failed")
+
+    # এখানে আমরা একটি লোকাল ডাউনলোড ইউআরএল তৈরি করছি
+    video_title = extraction_result.get('title', 'video').replace(" ", "_")
+    download_url = f"/api/download?video_url={extraction_result['direct_url']}&title={video_title}"
+
+    return {
+        "source": "extractor",
+        "data": extraction_result,
+        "download_proxy_url": download_url # এটি আমাদের নতুন ডাউনলোড লিংক
+    }
+
+@router.get("/download")
+async def download_video(
+    video_url: str = Query(...),
+    title: str = Query("video")
+):
+    """
+    এটি ইউটিউব থেকে ভিডিও স্ট্রিম করে সরাসরি ইউজারের কাছে পাঠিয়ে দিবে।
+    এতে কোনো IP-Lock সমস্যা হবে না।
+    """
+    async def stream_video():
+        # ইউটিউবের রিকোয়েস্টের জন্য একটি ফেইক ব্রাউজার হেডার
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+        }
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", video_url, headers=headers, follow_redirects=True) as r:
+                async for chunk in r.aiter_bytes(chunk_size=1024*1024): # 1MB chunks
+                    yield chunk
+
+    return StreamingResponse(
+        stream_video(),
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f"attachment; filename={title}.mp4"
+        }
+    )
